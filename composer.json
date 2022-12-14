@@ -1,0 +1,14 @@
+{
+  "name": "creativestyle/magesuite-product-image-alt-tag-importer",
+  "homepage": "https://creativestyle.de",
+  "license": "OSL-3.0",
+  "type": "magento2-module",
+  "autoload": {
+    "files": [
+      "registration.php"
+    ],
+    "psr-4": {
+      "MageSuite\\ProductImageAltTagImporter\\": ""
+    }
+  }
+}
