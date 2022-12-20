@@ -1,0 +1,5 @@
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_ImportExport:etc/import.xsd">
+    <entity name="product_image_alt" label="Product Image Alt Import" model="MageSuite\ProductImageAltTagImporter\Model\Import\AltTag"
+            behaviorModel="Magento\ImportExport\Model\Source\Import\Behavior\Basic"/>
+</config>
