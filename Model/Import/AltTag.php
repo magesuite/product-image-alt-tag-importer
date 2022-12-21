@@ -138,7 +138,7 @@ class AltTag extends \Magento\ImportExport\Model\Import\Entity\AbstractEntity
             foreach ($entityRows as $entityRow) {
                 $select = $this->connection->select()
                     ->from(
-                        $this->connection->getTableName('catalog_product_entity_media_gallery'),
+                        $this->resource->getTableName('catalog_product_entity_media_gallery'),
                         ['value_id']
                     )->where('value like ?', '%' . $entityRow['filename']);
                 $valueIds = $this->connection->fetchCol($select);
@@ -172,7 +172,7 @@ class AltTag extends \Magento\ImportExport\Model\Import\Entity\AbstractEntity
         $value = $this->connection->getCaseSql('value_id', $conditions);
         $where = ['value_id IN (?)' => array_keys($conditions)];
         $this->connection->update(
-            $this->connection->getTableName('catalog_product_entity_media_gallery_value'),
+            $this->resource->getTableName('catalog_product_entity_media_gallery_value'),
             ['label' => $value],
             $where
         );
