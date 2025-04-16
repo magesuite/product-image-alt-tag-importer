@@ -1,2 +1,3 @@
-filename,label
-magento_image.jpg,dummy label 1
+filename,label,store_view_code
+magento_image.jpg,test-label-in-german,default
+magento_image.jpg,test-label-in-english,fixture_second_store
