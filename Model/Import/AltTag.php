@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace MageSuite\ProductImageAltTagImporter\Model\Import;
@@ -8,16 +9,23 @@ class AltTag extends \Magento\ImportExport\Model\Import\Entity\AbstractEntity
     public const ENTITY_CODE = 'product_image_alt';
     public const FILENAME_COLUMN = 'filename';
 
+    /** @var bool $needColumnCheck */
     protected $needColumnCheck = true;
+
+    /** @var bool $logInHistory */
     protected $logInHistory = true;
+
+    /** @var array $validColumnNames */
     protected $validColumnNames = [
         'filename',
-        'label'
+        'label',
+        'store_view_code',
     ];
 
     protected \Magento\Framework\DB\Adapter\AdapterInterface $connection;
     protected \Magento\Framework\App\ResourceConnection $resource;
-    protected int $batchSize;
+    protected \MageSuite\ProductImageAltTagImporter\Model\MediaGallery $mediaGallery;
+    protected \Magento\Store\Api\StoreRepositoryInterface $storeRepository;
 
     public function __construct(
         \Magento\Framework\Json\Helper\Data $jsonHelper,
@@ -26,20 +34,22 @@ class AltTag extends \Magento\ImportExport\Model\Import\Entity\AbstractEntity
         \Magento\Framework\App\ResourceConnection $resource,
         \Magento\ImportExport\Model\ResourceModel\Helper $resourceHelper,
         \Magento\ImportExport\Model\Import\ErrorProcessing\ProcessingErrorAggregatorInterface $errorAggregator,
-        int $batchSize = 100
+        \MageSuite\ProductImageAltTagImporter\Model\MediaGallery $mediaGallery,
+        \Magento\Store\Api\StoreRepositoryInterface $storeRepository,
     ) {
         $this->jsonHelper = $jsonHelper;
         $this->_importExportData = $importExportData;
         $this->_resourceHelper = $resourceHelper;
         $this->_dataSourceModel = $importData;
         $this->resource = $resource;
-        $this->connection = $resource->getConnection(\Magento\Framework\App\ResourceConnection::DEFAULT_CONNECTION);
+        $this->connection = $resource->getConnection();
         $this->errorAggregator = $errorAggregator;
+        $this->mediaGallery = $mediaGallery;
+        $this->storeRepository = $storeRepository;
         $this->initMessageTemplates();
-        $this->batchSize = $batchSize;
     }
 
-    public function getEntityTypeCode()
+    public function getEntityTypeCode(): string
     {
         return static::ENTITY_CODE;
     }
@@ -61,7 +71,7 @@ class AltTag extends \Magento\ImportExport\Model\Import\Entity\AbstractEntity
         );
     }
 
-    public function validateRow(array $rowData, $rowNum): bool
+    public function validateRow(array $rowData, $rowNum): bool // phpcs:ignore
     {
         $filename = $rowData['filename'] ?? '';
         $label = $rowData['label'] ?? '';
@@ -88,6 +98,7 @@ class AltTag extends \Magento\ImportExport\Model\Import\Entity\AbstractEntity
         switch ($this->getBehavior()) {
             case \Magento\ImportExport\Model\Import::BEHAVIOR_REPLACE:
             case \Magento\ImportExport\Model\Import::BEHAVIOR_APPEND:
+            case \Magento\ImportExport\Model\Import::BEHAVIOR_ADD_UPDATE:
                 $this->saveAndReplaceEntity();
                 break;
         }
@@ -97,8 +108,6 @@ class AltTag extends \Magento\ImportExport\Model\Import\Entity\AbstractEntity
 
     protected function saveAndReplaceEntity(): void
     {
-        $behavior = $this->getBehavior();
-        $rows = [];
         while ($bunch = $this->_dataSourceModel->getNextBunch()) {
             $entityList = [];
 
@@ -112,74 +121,43 @@ class AltTag extends \Magento\ImportExport\Model\Import\Entity\AbstractEntity
                     continue;
                 }
 
-                $rowId = $row[static::FILENAME_COLUMN];
-                $rows[] = $rowId;
-                $columnValues = [];
-
-                foreach ($this->getAvailableColumns() as $columnKey) {
-                    $columnValues[$columnKey] = $row[$columnKey];
+                try {
+                    $entityList[] = $this->prepareRowForDb($row);
+                } catch (\Magento\Framework\Exception\NoSuchEntityException $e) {
+                    $this->addRowError($e->getMessage(), $rowNum);
                 }
-
-                $entityList[$rowId][] = $columnValues;
-                $this->countItemsCreated += (int) !isset($row[static::FILENAME_COLUMN]);
-                $this->countItemsUpdated += (int) isset($row[static::FILENAME_COLUMN]);
             }
 
-            $this->saveEntityFinish($entityList);
+            $this->save($entityList);
         }
     }
 
-    protected function saveEntityFinish(array $entityData): bool
+    /**
+     * @throws \Magento\Framework\Exception\NoSuchEntityException
+     */
+    protected function prepareRowForDb(array $rowData): array
     {
-        $rows = [];
-        $conditions = [];
+        $storeId = $this->storeRepository->get($rowData['store_view_code'])->getId();
+        $mediaGalleryItem = $this->mediaGallery->findByFilename($rowData['filename'], (int)$storeId);
 
-        foreach ($entityData as $entityRows) {
-            foreach ($entityRows as $entityRow) {
-                $select = $this->connection->select()
-                    ->from(
-                        $this->resource->getTableName('catalog_product_entity_media_gallery'),
-                        ['value_id']
-                    )->where('value like ?', '%' . $entityRow['filename']);
-                $valueIds = $this->connection->fetchCol($select);
-
-                if (empty($valueIds)) {
-                    continue;
-                }
-
-                foreach ($valueIds as $valueId) {
-                    $case = $this->connection->quoteInto('?', (int)$valueId);
-                    $result = $this->connection->quoteInto('?', $entityRow['label']);
-                    $conditions[$case] = $result;
-                }
-
-                if (count($conditions) >= $this->batchSize) {
-                    $this->saveData($conditions);
-                    $conditions = [];
-                }
-            }
-        }
-
-        if (!empty($conditions)) {
-            $this->saveData($conditions);
-        }
-
-        return !empty($entityData);
+        return [
+            'label' => $rowData['label'],
+            'value_id' => $mediaGalleryItem['value_id'],
+            'store_id' => $mediaGalleryItem['store_id'],
+            'entity_id' => $mediaGalleryItem['entity_id'],
+            'position' => $mediaGalleryItem['position'],
+            'disabled' => $mediaGalleryItem['disabled'],
+        ];
     }
 
-    protected function saveData(array $conditions): void
+    protected function save(array $rows): void
     {
-        $value = $this->connection->getCaseSql('value_id', $conditions);
-        $where = ['value_id IN (?)' => array_keys($conditions)];
-        $this->connection->update(
+        $affectedRows = $this->resource->getConnection()->insertOnDuplicate(
             $this->resource->getTableName('catalog_product_entity_media_gallery_value'),
-            ['label' => $value],
-            $where
+            $rows,
+            ['label']
         );
-    }
 
-    protected function getAvailableColumns(): array
-    {
-        return $this->validColumnNames;
+        $this->countItemsUpdated += $affectedRows;
     }
 }
