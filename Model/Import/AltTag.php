@@ -69,12 +69,21 @@ class AltTag extends \Magento\ImportExport\Model\Import\Entity\AbstractEntity
             'LabelIsRequired',
             __('The label cannot be empty.')
         );
+        $this->addMessageTemplate(
+            'StoreViewCodeIsRequired',
+            __('The store view code cannot be empty.')
+        );
+        $this->addMessageTemplate(
+            'ImageNotFound',
+            __('Image with the specified filename does not exist in the media gallery.')
+        );
     }
 
     public function validateRow(array $rowData, $rowNum): bool // phpcs:ignore
     {
         $filename = $rowData['filename'] ?? '';
         $label = $rowData['label'] ?? '';
+        $storeViewCode = $rowData['store_view_code'] ?? '';
 
         if (!$filename) {
             $this->addRowError('FilenameIsRequired', $rowNum);
@@ -82,6 +91,10 @@ class AltTag extends \Magento\ImportExport\Model\Import\Entity\AbstractEntity
 
         if (!$label) {
             $this->addRowError('LabelIsRequired', $rowNum);
+        }
+
+        if (!$storeViewCode) {
+            $this->addRowError('StoreViewCodeIsRequired', $rowNum);
         }
 
         if (isset($this->_validatedRows[$rowNum])) {
@@ -95,21 +108,9 @@ class AltTag extends \Magento\ImportExport\Model\Import\Entity\AbstractEntity
 
     protected function _importData(): bool
     {
-        switch ($this->getBehavior()) {
-            case \Magento\ImportExport\Model\Import::BEHAVIOR_REPLACE:
-            case \Magento\ImportExport\Model\Import::BEHAVIOR_APPEND:
-            case \Magento\ImportExport\Model\Import::BEHAVIOR_ADD_UPDATE:
-                $this->saveAndReplaceEntity();
-                break;
-        }
-
-        return true;
-    }
-
-    protected function saveAndReplaceEntity(): void
-    {
-        while ($bunch = $this->_dataSourceModel->getNextBunch()) {
+        while ($bunch = $this->_dataSourceModel->getNextBunch()) {// phpcs:ignore
             $entityList = [];
+            $this->mediaGallery->load(array_unique(array_column($bunch, 'filename')));
 
             foreach ($bunch as $rowNum => $row) {
                 if (!$this->validateRow($row, $rowNum)) {
@@ -123,13 +124,19 @@ class AltTag extends \Magento\ImportExport\Model\Import\Entity\AbstractEntity
 
                 try {
                     $entityList[] = $this->prepareRowForDb($row);
-                } catch (\Magento\Framework\Exception\NoSuchEntityException $e) {
-                    $this->addRowError($e->getMessage(), $rowNum);
+                } catch (\Magento\Framework\Exception\NoSuchEntityException) {
+                    $this->addRowError('ImageNotFound', $rowNum);
                 }
+            }
+
+            if (empty($entityList)) {
+                continue;
             }
 
             $this->save($entityList);
         }
+
+        return !$this->getErrorAggregator()->hasToBeTerminated();
     }
 
     /**
@@ -147,17 +154,13 @@ class AltTag extends \Magento\ImportExport\Model\Import\Entity\AbstractEntity
             'entity_id' => $mediaGalleryItem['entity_id'],
             'position' => $mediaGalleryItem['position'],
             'disabled' => $mediaGalleryItem['disabled'],
+            'record_id' => $mediaGalleryItem['record_id'],
         ];
     }
 
     protected function save(array $rows): void
     {
-        $affectedRows = $this->resource->getConnection()->insertOnDuplicate(
-            $this->resource->getTableName('catalog_product_entity_media_gallery_value'),
-            $rows,
-            ['label']
-        );
-
-        $this->countItemsUpdated += $affectedRows;
+        $tableName = $this->resource->getTableName('catalog_product_entity_media_gallery_value');
+        $this->countItemsUpdated += $this->resource->getConnection()->insertOnDuplicate($tableName, $rows, ['label']);
     }
 }

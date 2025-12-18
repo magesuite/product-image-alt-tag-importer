@@ -6,18 +6,13 @@ namespace MageSuite\ProductImageAltTagImporter\Model;
 
 class MediaGallery
 {
-    protected array $mediaGallery = [];
+    protected array $items = [];
 
     public function __construct(protected \Magento\Framework\App\ResourceConnection $resource) {}
 
     public function getItems(): array
     {
-        if (!empty($this->mediaGallery)) {
-            return $this->mediaGallery;
-        }
-
-        $this->load();
-        return $this->mediaGallery;
+        return $this->items;
     }
 
     /**
@@ -25,10 +20,8 @@ class MediaGallery
      */
     public function findByFilename(string $filename, int $storeId): array
     {
-        $gallery = $this->getItems();
-
         $matchedRows = [];
-        foreach ($gallery as $item) {
+        foreach ($this->items as $item) {
             if (str_ends_with($item['value'], $filename)) {
                 $matchedRows[] = $item;
             }
@@ -43,6 +36,7 @@ class MediaGallery
         foreach ($matchedRows as $row) {
             if ($row['store_id'] == 0) {
                 $row['store_id'] = $storeId;
+                $row['record_id'] = null;
                 return $row;
             }
         }
@@ -52,12 +46,12 @@ class MediaGallery
         );
     }
 
-    protected function load(): void
+    public function load(array $filenames): void
     {
         $select = $this->resource->getConnection()->select()
-            ->from(['value' => $this->resource->getTableName('catalog_product_entity_media_gallery_value')])
-            ->join(['main' => $this->resource->getTableName('catalog_product_entity_media_gallery')], 'main.value_id = value.value_id');
-        $result = array_column($this->resource->getConnection()->fetchAll($select), null, 'value_id');
-        $this->mediaGallery = $result;
+            ->from(['cpemgv' => $this->resource->getTableName('catalog_product_entity_media_gallery_value')])
+            ->join(['cpemg' => $this->resource->getTableName('catalog_product_entity_media_gallery')], 'cpemg.value_id = cpemgv.value_id')
+            ->where('cpemg.value IN (?)', $filenames);
+        $this->items = $this->resource->getConnection()->fetchAll($select);
     }
 }
